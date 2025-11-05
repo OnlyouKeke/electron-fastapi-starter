@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
-import { spawn, ChildProcess } from 'child_process'
+import { spawn, spawnSync, ChildProcess } from 'child_process'
 import { platform } from 'os'
 import { createHash } from 'crypto'
 import { appendFileSync, existsSync, mkdirSync, renameSync, statSync } from 'fs'
@@ -149,40 +149,84 @@ function createWindow() {
   })
 }
 
+function detectPythonCommand(): { command: string; args: string[] } | null {
+  const candidates: Array<{ command: string; args: string[] }> = []
+
+  const envPython = process.env.PYTHON ?? process.env.PYTHON_PATH
+  if (envPython) {
+    candidates.push({ command: envPython, args: [] })
+  }
+
+  candidates.push({ command: 'python', args: [] })
+  candidates.push({ command: 'python3', args: [] })
+  candidates.push({ command: 'py', args: ['-3'] })
+  candidates.push({ command: 'py', args: [] })
+
+  for (const candidate of candidates) {
+    try {
+      const result = spawnSync(candidate.command, [...candidate.args, '--version'], {
+        stdio: 'pipe',
+        encoding: 'utf8'
+      })
+
+      if (result.error) {
+        continue
+      }
+
+      if (result.status === 0) {
+        const detected = `${candidate.command}${candidate.args.length ? ` ${candidate.args.join(' ')}` : ''}`
+        console.log('Detected python executable:', detected)
+        return candidate
+      }
+    } catch (error) {
+      // 忽略检测失败的候选项
+      continue
+    }
+  }
+
+  console.error('Unable to detect a Python executable. Please ensure Python is installed and available in PATH.')
+  return null
+}
+
 // 启动FastAPI后端
 function startFastApi() {
   console.log('Starting FastAPI backend...')
-  
+
   // 生成启动token
   const startupToken = generateStartupToken()
   console.log('Generated startup token for backend verification')
-  
+
   // 设置环境变量
   const env = {
     ...process.env,
     FASTAPI_STARTUP_TOKEN: startupToken,
     FASTAPI_PORT: backendPort.toString()
   }
-  
+
   if (isDev) {
     // 开发模式：使用 Python 脚本启动
     const backendDir = join(__dirname, '..', '..', '..', 'backend')
     const pythonScript = join(backendDir, 'app', 'main.py')
-    
+
     console.log('Development mode: Starting Python script')
     console.log('Backend directory:', backendDir)
     console.log('Python script:', pythonScript)
-    
+
+    const pythonCommand = detectPythonCommand()
+    if (!pythonCommand) {
+      return
+    }
+
     try {
-        // 使用 Python 直接运行 main.py，传递环境变量
-          fastApiProcess = spawn('python', ['app/main.py'], {
-            cwd: backendDir,
-            stdio: ['ignore', 'pipe', 'pipe'],
-            env: env
-          })
-      } catch (error) {
-        console.error('Failed to start FastAPI in development mode:', error)
-      }
+      // 使用 Python 直接运行 main.py，传递环境变量
+      fastApiProcess = spawn(pythonCommand.command, [...pythonCommand.args, 'app/main.py'], {
+        cwd: backendDir,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: env
+      })
+    } catch (error) {
+      console.error('Failed to start FastAPI in development mode:', error)
+    }
   } else {
     // 生产模式：使用打包的 exe 文件
     const backendExecutable = join(process.resourcesPath, 'fastapi-backend.exe')

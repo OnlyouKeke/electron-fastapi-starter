@@ -96,6 +96,9 @@
             <el-button :disabled="!hasReport" @click="downloadImage">下载图片</el-button>
             <el-button @click="resetAll">重置内容</el-button>
           </div>
+          <div class="log-button-wrapper">
+            <el-button type="info" plain @click="goToLogs">查看运行日志</el-button>
+          </div>
         </el-card>
       </el-col>
     </el-row>
@@ -105,6 +108,7 @@
 <script lang="ts" setup>
 import { ElMessage } from 'element-plus'
 import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { postDetect } from '../api/api'
 import type { Detection } from '../types/api'
 
@@ -132,6 +136,7 @@ const imageSrc = ref('')
 const detections = ref<Detection[]>([])
 const isDetecting = ref(false)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
+const router = useRouter()
 
 const hasReport = computed(() => Boolean(imageSrc.value))
 
@@ -250,6 +255,10 @@ const scheduleRender = () => {
   nextTick(() => {
     void drawReport()
   })
+}
+
+const goToLogs = () => {
+  router.push({ name: 'logs' })
 }
 
 const drawReport = async () => {
@@ -554,6 +563,12 @@ scheduleRender()
   flex-wrap: wrap;
   gap: 12px;
   justify-content: flex-end;
+}
+
+.log-button-wrapper {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-start;
 }
 
 @media (max-width: 991px) {

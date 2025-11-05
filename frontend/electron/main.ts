@@ -3,7 +3,7 @@ import { join } from 'path'
 import { spawn, spawnSync, ChildProcess } from 'child_process'
 import { platform } from 'os'
 import { createHash } from 'crypto'
-import { appendFileSync, existsSync, mkdirSync, renameSync, statSync } from 'fs'
+import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, readFileSync } from 'fs'
 
 // 是否是开发环境
 const isDev = process.env.NODE_ENV === 'development'
@@ -15,6 +15,9 @@ const originalConsoleError = console.error.bind(console)
 let logFilePath: string | null = null
 
 const MAX_LOG_FILE_SIZE = 5 * 1024 * 1024
+const MAX_LOG_BUFFER_LINES = 1000
+
+const logBuffer: string[] = []
 
 function formatLogValue(value: unknown): string {
   if (Buffer.isBuffer(value)) {
@@ -37,6 +40,15 @@ function formatLogValue(value: unknown): string {
 }
 
 function appendLog(level: 'INFO' | 'WARN' | 'ERROR', args: unknown[]) {
+  const timestamp = new Date().toISOString()
+  const message = args.map((value) => formatLogValue(value)).join(' ')
+  const formattedLine = `[${timestamp}] [${level}] ${message}`
+
+  logBuffer.push(formattedLine)
+  if (logBuffer.length > MAX_LOG_BUFFER_LINES) {
+    logBuffer.splice(0, logBuffer.length - MAX_LOG_BUFFER_LINES)
+  }
+
   if (!logFilePath) {
     return
   }
@@ -54,27 +66,25 @@ function appendLog(level: 'INFO' | 'WARN' | 'ERROR', args: unknown[]) {
       }
     }
 
-    const timestamp = new Date().toISOString()
-    const message = args.map((value) => formatLogValue(value)).join(' ')
-    appendFileSync(logFilePath, `[${timestamp}] [${level}] ${message}\n`, { encoding: 'utf8' })
+    appendFileSync(logFilePath, `${formattedLine}\n`, { encoding: 'utf8' })
   } catch (error) {
     originalConsoleError('写入日志文件失败:', error)
   }
 }
 
 function initializeLogging() {
-  if (isDev || platform() !== 'win32') {
-    return
-  }
-
   try {
-    const logsDir = join(app.getPath('userData'), 'logs')
-    if (!existsSync(logsDir)) {
-      mkdirSync(logsDir, { recursive: true })
-    }
+    if (!isDev && platform() === 'win32') {
+      const logsDir = join(app.getPath('userData'), 'logs')
+      if (!existsSync(logsDir)) {
+        mkdirSync(logsDir, { recursive: true })
+      }
 
-    logFilePath = join(logsDir, 'main.log')
-    originalConsoleLog('日志文件路径:', logFilePath)
+      logFilePath = join(logsDir, 'main.log')
+      originalConsoleLog('日志文件路径:', logFilePath)
+    } else {
+      logFilePath = null
+    }
 
     console.log = (...args: unknown[]) => {
       originalConsoleLog(...args)
@@ -91,8 +101,11 @@ function initializeLogging() {
       appendLog('ERROR', args)
     }
 
-    appendLog('INFO', ['日志文件路径:', logFilePath])
-    appendLog('INFO', ['Windows 日志系统已初始化'])
+    appendLog('INFO', ['日志系统已初始化'])
+    if (logFilePath) {
+      appendLog('INFO', ['日志文件路径:', logFilePath])
+      appendLog('INFO', ['Windows 日志系统已初始化'])
+    }
   } catch (error) {
     originalConsoleError('初始化日志系统失败:', error)
   }
@@ -309,5 +322,26 @@ ipcMain.handle('get-app-info', () => {
     version: app.getVersion(),
     name: app.getName(),
     appPath: app.getAppPath()
+  }
+})
+
+ipcMain.handle('get-log-entries', () => {
+  try {
+    if (logFilePath && existsSync(logFilePath)) {
+      const rawLogs = readFileSync(logFilePath, { encoding: 'utf8' })
+      const fileLines = rawLogs.split(/\r?\n/).filter((line) => line.trim().length > 0)
+      const combined = [...fileLines.slice(-MAX_LOG_BUFFER_LINES)]
+      return {
+        logs: combined,
+        logFilePath
+      }
+    }
+  } catch (error) {
+    appendLog('ERROR', ['读取日志文件失败:', error instanceof Error ? error.message : error])
+  }
+
+  return {
+    logs: [...logBuffer],
+    logFilePath
   }
 })

@@ -10,6 +10,14 @@ const routes: Array<RouteRecordRaw> = [
     }
   },
   {
+    path: '/logs',
+    name: 'logs',
+    component: () => import('../views/LogViewer.vue'),
+    meta: {
+      title: '系统运行日志'
+    }
+  },
+  {
     path: '/:pathMatch(.*)*',
     redirect: '/'
   }

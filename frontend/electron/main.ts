@@ -3,9 +3,100 @@ import { join } from 'path'
 import { spawn, ChildProcess } from 'child_process'
 import { platform } from 'os'
 import { createHash } from 'crypto'
+import { appendFileSync, existsSync, mkdirSync, renameSync, statSync } from 'fs'
 
 // 是否是开发环境
 const isDev = process.env.NODE_ENV === 'development'
+
+const originalConsoleLog = console.log.bind(console)
+const originalConsoleWarn = console.warn.bind(console)
+const originalConsoleError = console.error.bind(console)
+
+let logFilePath: string | null = null
+
+const MAX_LOG_FILE_SIZE = 5 * 1024 * 1024
+
+function formatLogValue(value: unknown): string {
+  if (Buffer.isBuffer(value)) {
+    return value.toString('utf8')
+  }
+
+  if (value instanceof Error) {
+    return value.stack ?? value.message
+  }
+
+  if (typeof value === 'object' && value !== null) {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return Object.prototype.toString.call(value)
+    }
+  }
+
+  return String(value)
+}
+
+function appendLog(level: 'INFO' | 'WARN' | 'ERROR', args: unknown[]) {
+  if (!logFilePath) {
+    return
+  }
+
+  try {
+    if (existsSync(logFilePath)) {
+      try {
+        const stats = statSync(logFilePath)
+        if (stats.size >= MAX_LOG_FILE_SIZE) {
+          const backupPath = `${logFilePath}.${Date.now()}.bak`
+          renameSync(logFilePath, backupPath)
+        }
+      } catch (sizeError) {
+        originalConsoleWarn('获取日志文件大小失败:', sizeError)
+      }
+    }
+
+    const timestamp = new Date().toISOString()
+    const message = args.map((value) => formatLogValue(value)).join(' ')
+    appendFileSync(logFilePath, `[${timestamp}] [${level}] ${message}\n`, { encoding: 'utf8' })
+  } catch (error) {
+    originalConsoleError('写入日志文件失败:', error)
+  }
+}
+
+function initializeLogging() {
+  if (isDev || platform() !== 'win32') {
+    return
+  }
+
+  try {
+    const logsDir = join(app.getPath('userData'), 'logs')
+    if (!existsSync(logsDir)) {
+      mkdirSync(logsDir, { recursive: true })
+    }
+
+    logFilePath = join(logsDir, 'main.log')
+    originalConsoleLog('日志文件路径:', logFilePath)
+
+    console.log = (...args: unknown[]) => {
+      originalConsoleLog(...args)
+      appendLog('INFO', args)
+    }
+
+    console.warn = (...args: unknown[]) => {
+      originalConsoleWarn(...args)
+      appendLog('WARN', args)
+    }
+
+    console.error = (...args: unknown[]) => {
+      originalConsoleError(...args)
+      appendLog('ERROR', args)
+    }
+
+    appendLog('INFO', ['日志文件路径:', logFilePath])
+    appendLog('INFO', ['Windows 日志系统已初始化'])
+  } catch (error) {
+    originalConsoleError('初始化日志系统失败:', error)
+  }
+}
 
 // FastAPI进程
 let fastApiProcess: ChildProcess | null = null
@@ -126,6 +217,7 @@ function startFastApi() {
 
 // 当Electron应用准备好时，创建窗口
 app.whenReady().then(() => {
+  initializeLogging()
   // 启动FastAPI后端
   startFastApi()
   

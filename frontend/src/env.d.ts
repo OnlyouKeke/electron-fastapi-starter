@@ -17,3 +17,31 @@ declare module '*.svg' {
   const SVG: React.VFC<React.SVGProps<SVGSVGElement>>
   export default SVG
 }
+
+export {}
+
+declare global {
+  interface ElectronBridgeAPI {
+    getAppInfo: () => Promise<{
+      version: string
+      name: string
+      appPath: string
+    }>
+    getLogs?: () => Promise<{
+      logs: string[]
+      logFilePath: string | null
+    }>
+    send: (channel: string, data: any) => void
+    receive: (channel: string, func: (...args: any[]) => void) => void
+  }
+
+  interface AppRuntimeInfo {
+    isElectron?: boolean
+    platform?: string
+  }
+
+  interface Window {
+    electronAPI?: ElectronBridgeAPI
+    appRuntime?: AppRuntimeInfo
+  }
+}

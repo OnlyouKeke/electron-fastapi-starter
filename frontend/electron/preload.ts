@@ -4,6 +4,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 contextBridge.exposeInMainWorld('electronAPI', {
   // 获取应用信息
   getAppInfo: () => ipcRenderer.invoke('get-app-info'),
+  getLogs: () => ipcRenderer.invoke('get-log-entries'),
   
   // 与主进程通信的方法
   send: (channel: string, data: any) => {
